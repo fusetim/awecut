@@ -12,6 +12,9 @@ pub enum AppError {
         source: std::io::Error,
     },
 
+    #[error("unexpected error (due to failed assumptions), context: {}", .context)]
+    Unexpected { context: String },
+
     #[error("unknown error")]
     Unknown,
 }

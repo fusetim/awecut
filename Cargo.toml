@@ -17,3 +17,4 @@ rusty-chromaprint = { git = "https://github.com/fusetim/rusty-chromaprint.git", 
 thiserror = "1.0.47"
 tokio = { version = "1.32.0", features = [ "full" ] }
 symphonia = { version = "0.5.2", features = ["all"]}
+indicatif-log-bridge = "0.2.1"

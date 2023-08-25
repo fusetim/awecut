@@ -96,6 +96,7 @@ dependencies = [
  "env_logger",
  "futures-util",
  "indicatif",
+ "indicatif-log-bridge",
  "log",
  "rusty-chromaprint",
  "symphonia",
@@ -344,6 +345,16 @@ dependencies = [
  "number_prefix",
  "portable-atomic",
  "unicode-width",
+]
+
+[[package]]
+name = "indicatif-log-bridge"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20b43dee3b17c8e1bd4d8691b1122d57c1710d121a717d80c4dd13d6f566b954"
+dependencies = [
+ "indicatif",
+ "log",
 ]
 
 [[package]]
