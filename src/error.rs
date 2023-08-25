@@ -6,6 +6,18 @@ pub enum AppError {
         source: PackError,
     },
 
+    #[error("fingerprint error")]
+    Fingerprint {
+        #[from]
+        source: FingerprintError,
+    },
+
+    #[error("cut error")]
+    Cut {
+        #[from]
+        source: CutError,
+    },
+
     #[error("underlying IO error")]
     Io {
         #[from]
@@ -67,6 +79,30 @@ pub enum FingerprintError {
     PrinterReset {
         #[from]
         source: rusty_chromaprint::ResetError,
+    },
+
+    #[error("unknown pack error")]
+    Unknown,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum CutError {
+    #[error("underlying IO error")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+
+    #[error("fingerprint error")]
+    Fingerprint {
+        #[from]
+        source: FingerprintError,
+    },
+
+    #[error("pack error")]
+    Pack {
+        #[from]
+        source: PackError,
     },
 
     #[error("underlying chromaprint error (match system)")]

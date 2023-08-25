@@ -244,7 +244,7 @@ pub async fn calculate_fingerprint<T: AsRef<Path>>(
         .codec_params
         .channels
         .unwrap_or_else(|| {
-            log::warn!("Cannot find the number of channel in the first audio track, guessing 2.");
+            log::warn!("Cannot find the number of channels in the first audio track, guessing 2.");
             Channels::FRONT_LEFT | Channels::FRONT_RIGHT
         })
         .count() as u32;
@@ -263,6 +263,7 @@ pub async fn calculate_fingerprint<T: AsRef<Path>>(
     bar.set_message("sampling and fingerprinting...");
 
     let mut sample_buf = None;
+    let mut apac_index = 0;
 
     loop {
         let packet = match format.next_packet() {
@@ -276,7 +277,10 @@ pub async fn calculate_fingerprint<T: AsRef<Path>>(
 
         match decoder.decode(&packet) {
             Ok(audio_buf) => {
-                bar.inc(1);
+                apac_index += 1;
+                if apac_index % 1000 == 0 {
+                    bar.set_position(apac_index);
+                }
                 if sample_buf.is_none() {
                     let spec = *audio_buf.spec();
                     let duration = audio_buf.capacity() as u64;

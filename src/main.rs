@@ -4,6 +4,8 @@ use indicatif_log_bridge::LogWrapper;
 use std::path::PathBuf;
 use tokio::sync::OnceCell;
 
+mod cut;
+mod duration_util;
 mod error;
 mod fingerprint;
 mod pack;
@@ -31,6 +33,10 @@ enum Command {
         /// Input media to cut
         #[arg(required = true)]
         input: PathBuf,
+
+        /// Output media
+        #[arg(required = true)]
+        output: PathBuf,
 
         /// Inclusion fingerprint list (as pack-files)
         #[arg(long, short)]
@@ -68,7 +74,10 @@ async fn main() -> Result<(), AppError> {
             input,
             include,
             exclude,
-        } => {}
+            output,
+        } => {
+            cut::cut_media(input, include, exclude, output).await?;
+        }
     }
 
     Ok(())
