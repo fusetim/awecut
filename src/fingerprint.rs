@@ -29,7 +29,7 @@ pub async fn update_fingerprints(inputs: Vec<PathBuf>) -> Result<(), AppError> {
             }
             Ok(false) => {}
             Err(err) => {
-                log::error!("Unable to verify if the packed fingerprints exist at {}. It will certainly failed to save too. Cause:\n{:?}", pack.display(), err);
+                log::error!("unable to verify if the packed fingerprints exist at {}. It will certainly failed to save too. Cause:\n{:?}", pack.display(), err);
             }
         }
         fut_files.push(Box::pin(async move {
@@ -47,7 +47,7 @@ pub async fn update_fingerprints(inputs: Vec<PathBuf>) -> Result<(), AppError> {
                             Ok(None) => break,
                             Err(err) => {
                                 log::error!(
-                                    "An error occured while listing directory {}, cause:\n{:?}",
+                                    "an error occured while listing directory {}, cause:\n{:?}",
                                     input.display(),
                                     err
                                 );
@@ -59,7 +59,7 @@ pub async fn update_fingerprints(inputs: Vec<PathBuf>) -> Result<(), AppError> {
                 }
                 Err(err) => {
                     log::error!(
-                        "Failed to list files in directory {}, cause:\n{:?}",
+                        "failed to list files in directory {}, cause:\n{:?}",
                         input.display(),
                         err
                     );
@@ -75,7 +75,7 @@ pub async fn update_fingerprints(inputs: Vec<PathBuf>) -> Result<(), AppError> {
         .filter_map(|pack| match pack {
             Ok(val) => Some(val),
             Err(err) => {
-                log::error!("An error occured while reading a pack-file:\n{:?}", err);
+                log::error!("an error occured while reading a pack-file:\n{:?}", err);
                 None
             }
         })
@@ -104,14 +104,14 @@ pub async fn update_fingerprints(inputs: Vec<PathBuf>) -> Result<(), AppError> {
             || dir[0].parent().unwrap().file_name().is_none()
         {
             log::error!(
-                "Failed to open parent dir at {}, ignoring this file.",
+                "failed to open parent dir at {}, ignoring this file.",
                 dir[0].display()
             );
             continue;
         }
         let dir_path = dir[0].parent().unwrap();
         let pack_path = dir_path.with_extension("pck");
-        bar.set_message(format!("Visiting {}...", dir_path.display()));
+        bar.set_message(format!("visiting {}...", dir_path.display()));
         let mut pack = match packs.binary_search_by(|p| p.0.cmp(&pack_path)) {
             Ok(i) => packs.remove(i),
             Err(_) => (pack_path, PackFile::default()),
@@ -124,19 +124,19 @@ pub async fn update_fingerprints(inputs: Vec<PathBuf>) -> Result<(), AppError> {
                         bar.update(|state: &mut ProgressState| {
                             state.set_len(state.len().unwrap_or(0).saturating_sub(1))
                         });
-                        log::info!("Skipping {}, fingerprint found in pack-file.", &name);
+                        log::info!("skipping {}, fingerprint found in pack-file.", &name);
                         continue;
                     }
                     Err(i) => i,
                 };
-                bar.set_message(format!("Fingerprinting {}...", &name));
+                bar.set_message(format!("fingerprinting {}...", &name));
                 match calculate_fingerprint(&file, &conf).await {
                     Ok(fg) => {
                         pack.1.fingerprint.insert(index, (name.clone(), fg));
                     }
                     Err(err) => {
                         log::error!(
-                            "Failed to calculate fingerprint for {}, err:\n{:?}",
+                            "failed to calculate fingerprint for {}, err:\n{:?}",
                             file.display(),
                             err
                         );
@@ -250,6 +250,18 @@ pub async fn calculate_fingerprint<T: AsRef<Path>>(
         .count() as u32;
     printer.start(sample_rate, channels)?;
 
+    let bar = PROGRESS
+        .get()
+        .expect("PROGRESS not initialized!")
+        .add(ProgressBar::new_spinner());
+    bar.set_style(
+        ProgressStyle::with_template(
+            "{spinner:.green} [{pos:>6}/? ] {wide_msg} [{elapsed} elapsed]",
+        )
+        .unwrap(),
+    );
+    bar.set_message("sampling and fingerprinting...");
+
     let mut sample_buf = None;
 
     loop {
@@ -264,6 +276,7 @@ pub async fn calculate_fingerprint<T: AsRef<Path>>(
 
         match decoder.decode(&packet) {
             Ok(audio_buf) => {
+                bar.inc(1);
                 if sample_buf.is_none() {
                     let spec = *audio_buf.spec();
                     let duration = audio_buf.capacity() as u64;
@@ -279,6 +292,11 @@ pub async fn calculate_fingerprint<T: AsRef<Path>>(
             Err(_) => break,
         }
     }
+
+    PROGRESS
+        .get()
+        .expect("PROGRESS not initialized!")
+        .remove(&bar);
 
     printer.finish();
     Ok(printer.fingerprint().to_vec())
