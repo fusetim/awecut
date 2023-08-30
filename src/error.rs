@@ -105,10 +105,33 @@ pub enum CutError {
         source: PackError,
     },
 
+    #[error("command (sub-process failed) error")]
+    Command {
+        #[from]
+        source: CommandError,
+    },
+
     #[error("underlying chromaprint error (match system)")]
     PrinterMatch {
         #[from]
         source: rusty_chromaprint::MatchError,
+    },
+
+    #[error("unknown pack error")]
+    Unknown,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum CommandError {
+    #[error("underlying IO error")]
+    Io {
+        #[from]
+        source: std::io::Error,
+    },
+
+    #[error("Output cannot be parsed in a expected type or value range, context: {}", .context)]
+    ParsingError {
+        context: String,
     },
 
     #[error("unknown pack error")]

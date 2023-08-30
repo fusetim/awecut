@@ -9,6 +9,7 @@ mod duration_util;
 mod error;
 mod fingerprint;
 mod pack;
+mod command;
 
 use error::AppError;
 
@@ -76,7 +77,7 @@ async fn main() -> Result<(), AppError> {
             exclude,
             output,
         } => {
-            cut::cut_media(input, include, exclude, output).await?;
+            cut::cut_matches(input, include, exclude).await?;
         }
     }
 

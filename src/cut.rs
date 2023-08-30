@@ -6,6 +6,7 @@ use std::boxed::Box;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::fmt::Display;
 
 use crate::duration_util::DurationDisplay;
 use crate::error::{CutError, PackError};
@@ -13,12 +14,14 @@ use crate::fingerprint::calculate_fingerprint;
 use crate::pack::PackFile;
 use crate::PROGRESS;
 
-pub async fn cut_media(
+type SegmentMatch = (Arc<String>, Segment);
+type SegmentMatches = Vec<SegmentMatch>;
+
+pub async fn cut_matches(
     input: PathBuf,
     include: Vec<PathBuf>,
     exclude: Vec<PathBuf>,
-    output: PathBuf,
-) -> Result<(), CutError> {
+) -> Result<(Vec<SegmentMatch>, Vec<SegmentMatch>), CutError> {
     let mut include_fgs: FuturesUnordered<
         Pin<Box<dyn Future<Output = Result<Vec<(String, Vec<u32>)>, CutError>>>>,
     > = FuturesUnordered::new();
@@ -50,7 +53,7 @@ pub async fn cut_media(
 
     for exc in exclude {
         let bar = pack_bar.clone();
-        include_fgs.push(Box::pin(async move {
+        exclude_fgs.push(Box::pin(async move {
             bar.set_message(format!("loading exclusion pack {}...", exc.display()));
             let mut reader = tokio::io::BufReader::new(tokio::fs::File::open(&exc).await?);
             let pack_file = PackFile::decode_async(&mut reader).await?;
@@ -179,32 +182,26 @@ pub async fn cut_media(
     exc_segments
         .sort_unstable_by(|(_, seg1), (_, seg2)| seg1.score.partial_cmp(&seg2.score).unwrap());
 
-    println!(
-        "- - - - - Name - - - -|- - Start - -|- - E n d - -|- Duration -| Score | (Inclusion list)"
-    );
-    for (name, seg) in inc_segments {
-        println!(
-            "{:20} -  {} -  {} - {} - {:.3}",
-            &name,
-            DurationDisplay(seg.start1(&config)),
-            DurationDisplay(seg.end1(&config)),
-            DurationDisplay(seg.duration(&config)),
-            seg.score
-        );
-    }
-    println!(
-        "- - - - - Name - - - -|- - Start - -|- - E n d - -|- Duration -| Score | (Exlusion list)"
-    );
-    for (name, seg) in exc_segments {
-        println!(
-            "{:20} -  {} -  {} - {} - {:.3}",
-            &name,
-            DurationDisplay(seg.start1(&config)),
-            DurationDisplay(seg.end1(&config)),
-            DurationDisplay(seg.duration(&config)),
-            seg.score
-        );
-    }
+    Ok((inc_segments, exc_segments))
+}
 
+pub fn print_fg_segments<T: Display>(config: &Configuration, segments: &Vec<(T, Segment)>) {
+    println!(
+        "|- - - - - - - - Name - - - - - - - - - -|- - Start - -|- - E n d - -|- Duration -| Score | (Exlusion list)"
+    );
+    for (name, seg) in segments {
+        println!(
+            "{:40} -  {} -  {} - {} - {:.3}",
+            name,
+            DurationDisplay(seg.start1(config)),
+            DurationDisplay(seg.end1(config)),
+            DurationDisplay(seg.duration(config)),
+            seg.score
+        );
+    }
+}
+
+pub async fn cut_interactive(inc_segs: SegmentMatches, exc_segs: SegmentMatches, input: PathBuf, output: PathBuf) -> Result<(), CutError> {
+    let mut cues : Vec<f32> = Vec::new();
     Ok(())
 }
