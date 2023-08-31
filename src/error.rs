@@ -111,6 +111,12 @@ pub enum CutError {
         source: CommandError,
     },
 
+    #[error("interactive error")]
+    Interactive {
+        #[from]
+        source: InteractiveError,
+    },
+
     #[error("underlying chromaprint error (match system)")]
     PrinterMatch {
         #[from]
@@ -129,7 +135,23 @@ pub enum CommandError {
         source: std::io::Error,
     },
 
-    #[error("Output cannot be parsed in a expected type or value range, context: {}", .context)]
+    #[error("output cannot be parsed in a expected type or value range, context: {}", .context)]
+    ParsingError {
+        context: String,
+    },
+
+    #[error("process failed: {}", .context)]
+    ProcessFailed {
+        context: String,
+    },
+
+    #[error("unknown pack error")]
+    Unknown,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum InteractiveError {
+    #[error("output cannot be parsed in a expected type or value range, context: {}", .context)]
     ParsingError {
         context: String,
     },

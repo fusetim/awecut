@@ -77,7 +77,15 @@ async fn main() -> Result<(), AppError> {
             exclude,
             output,
         } => {
-            cut::cut_matches(input, include, exclude).await?;
+            let input = std::fs::canonicalize(input)?;
+            let output = std::fs::canonicalize(output)?;
+
+            if include.len() + exclude.len() > 0 {
+                let (inc, exc) = cut::cut_matches(input.clone(), include, exclude).await?;
+                cut::cut_interactive(inc, exc, input, output).await?;
+            } else {
+                cut::cut_interactive(vec![], vec![], input, output).await?;
+            }
         }
     }
 

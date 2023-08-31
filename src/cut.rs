@@ -7,12 +7,16 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::fmt::Display;
+use std::str::FromStr;
+use tokio::io::{AsyncReadExt, AsyncBufReadExt, BufReader};
+use std::io::Write;
 
 use crate::duration_util::DurationDisplay;
-use crate::error::{CutError, PackError};
+use crate::error::{CutError, PackError, CommandError, InteractiveError};
 use crate::fingerprint::calculate_fingerprint;
 use crate::pack::PackFile;
 use crate::PROGRESS;
+use crate::command::{self, StreamRange};
 
 type SegmentMatch = (Arc<String>, Segment);
 type SegmentMatches = Vec<SegmentMatch>;
@@ -187,7 +191,7 @@ pub async fn cut_matches(
 
 pub fn print_fg_segments<T: Display>(config: &Configuration, segments: &Vec<(T, Segment)>) {
     println!(
-        "|- - - - - - - - Name - - - - - - - - - -|- - Start - -|- - E n d - -|- Duration -| Score | (Exlusion list)"
+        "|- - - - - - - - Name - - - - - - - - - -|- - Start - -|- - E n d - -|- Duration -| Score |"
     );
     for (name, seg) in segments {
         println!(
@@ -203,5 +207,150 @@ pub fn print_fg_segments<T: Display>(config: &Configuration, segments: &Vec<(T, 
 
 pub async fn cut_interactive(inc_segs: SegmentMatches, exc_segs: SegmentMatches, input: PathBuf, output: PathBuf) -> Result<(), CutError> {
     let mut cues : Vec<f32> = Vec::new();
+    let config = Configuration::preset_test3();
+    let keyframes : Vec<f32> = command::ffmpeg_keyframes(None, &input).await?;
+    let duration = command::ffmpeg_duration(None, &input).await?;
+    let temp = tempdir::TempDir::new("awecut")?;
+
+    cues.push(0.0);
+    cues.push(duration);
+
+    let stdin = tokio::io::stdin();
+    let mut reader = BufReader::new(stdin);
+    let mut buf = String::new();
+    loop {
+        print!("> ");
+        let _ = std::io::stdout().flush();
+        let len = reader.read_line(&mut buf).await?;
+        if len > 0 {
+            let comps : Vec<_> = buf.trim().split(" ").collect();
+            if comps.len() == 0 {
+                continue;
+            }
+            match comps[0] {
+                "exit" | "quit" => break,
+                "help" => println!("help - todo!"),
+                "matches" => {
+                    println!("Inclusion list:");
+                    print_fg_segments(&config, &inc_segs);
+                    println!("Exclusion list:");
+                    print_fg_segments(&config, &exc_segs);
+                },
+                "cues" => {
+                    println!("Cues:");
+                    print_cues(&cues);
+                },
+                "add" => {
+                    if comps.len() > 1 {
+                        let time = match parse_time(comps[1]) {
+                            Ok(time) => time,
+                            Err(err) => {
+                                eprintln!("add command failed, due to: {:?}", err);
+                                continue;
+                            }
+                        };
+                        match cues.binary_search_by(|c| c.partial_cmp(&time).unwrap()) {
+                            Ok(i) => cues.insert(i, time),
+                            Err(i) => cues.insert(i, time),
+                        }
+                        println!("cue added.");
+                    } else {
+                        eprintln!("missing 1 argument: time (as 00.00s or 00:00:00.00)");
+                    }
+                },
+                "remove" | "rem" | "del" | "delete" => {
+                    if comps.len() > 1 {
+                        if let Ok(index) = usize::from_str(comps[1]) {
+                            let _ = cues.remove(index);
+                            println!("cue {} removed!", index);
+                        } else {
+                            eprintln!("bad argument given, please provide 1 argument of type Number!");
+                        }
+                    } else {
+                        eprintln!("1 argument required.")
+                    }
+                },
+                "inspect" => {
+                    if comps.len() > 1 {
+                        if let Ok(center) = parse_time(comps[1]) {
+                                let range = if comps.len() <= 2 {
+                                    let mut start_time = center - (20.0*60.0);
+                                    if start_time < 0.0 { start_time = 0.0; }
+                                    let mut end_time = center + (20.0*60.0);
+                                    if end_time > duration { end_time = duration; }
+                                    StreamRange::nsecs_betweens(Some(start_time), Some(end_time), 60.0)
+                                } else if comps[2] == "key" || comps[2] == "keyframe" {
+                                    let mut start_time = center - 20.0;
+                                    if start_time < 0.0 { start_time = 0.0; }
+                                    let mut end_time = center + 20.0;
+                                    if end_time > duration { end_time = duration; }
+                                    StreamRange::keyframes_betweens(Some(start_time), Some(end_time))
+                                } else if comps[2] == "frame" || comps[2] == "all" {
+                                    let mut start_time = center - 5.0;
+                                    if start_time < 0.0 { start_time = 0.0; }
+                                    let mut end_time = center + 5.0;
+                                    if end_time > duration { end_time = duration; }
+                                    StreamRange::frames_betweens(Some(start_time), Some(end_time))
+                                } else if let Ok(scale) = parse_time(comps[2]) {
+                                    let mut start_time = center - 20.0*scale;
+                                    if start_time < 0.0 { start_time = 0.0; }
+                                    let mut end_time = center + (20.0*scale);
+                                    if end_time > duration { end_time = duration; }
+                                    StreamRange::nsecs_betweens(Some(start_time), Some(end_time), scale)
+                                } else {
+                                    eprintln!("incorrect optional argument 2, provide a valid duration.");
+                                    continue;
+                                };
+                                println!("Clearing directory...");
+                                let _ = tokio::fs::remove_dir_all(temp.path()).await;
+                                tokio::fs::create_dir_all(temp.path()).await?;
+                                println!("Extracting frames to inspect at: {}", temp.path().display());
+                                command::ffmpeg_extract_frames(None, &input, temp.path(), &range).await?;
+                        } else {
+                            eprintln!("incorrect arg 1, please provide a time/duration.");
+                        }
+                    } else {
+                        eprintln!("1 argument required.")
+                    }
+                }
+                _ => eprintln!("invalid command!"),
+            }
+        } else {
+            break;
+        }
+        buf.clear();
+    }
+
     Ok(())
+}
+
+fn print_cues(cues: &Vec<f32>) {
+    println!("Number | Timestamp");
+    for (i, c) in cues.iter().enumerate() {
+        println!(
+            "{:^6} | {} ({}s)",
+            i,
+            DurationDisplay(*c),
+            c,
+        );
+    }
+}
+
+fn parse_time(time: &'_ str) -> Result<f32, InteractiveError> {
+    let dur : Vec<_> = time.rsplit(":").collect();
+    match dur.len() {
+        0 => Err(InteractiveError::ParsingError { context: "failed to parse duration: empty".into() }),
+        1 => Ok::<f32, InteractiveError>(f32::from_str(dur[0]).map_err(|err| InteractiveError::ParsingError { context: format!("failed to parse duration: {:?}", err) })?),
+        2 => {
+            let mins = u32::from_str(dur[1]).map_err(|err| InteractiveError::ParsingError { context: format!("failed to parse duration: {:?}", err) })?;
+            let secs = f32::from_str(dur[0]).map_err(|err| InteractiveError::ParsingError { context: format!("failed to parse duration: {:?}", err) })?;
+            Ok(((mins as f32)*60.0)+secs)
+        },
+        _ => {
+            let hours = u32::from_str(dur[2]).map_err(|err| InteractiveError::ParsingError { context: format!("failed to parse duration: {:?}", err) })?;
+            let mins = u32::from_str(dur[1]).map_err(|err| InteractiveError::ParsingError { context: format!("failed to parse duration: {:?}", err) })?;
+            let secs = f32::from_str(dur[0]).map_err(|err| InteractiveError::ParsingError { context: format!("failed to parse duration: {:?}", err) })?;
+            Ok(((((hours as f32)*60.0) + (mins as f32))*60.0)+secs)
+        },
+    }
 }
