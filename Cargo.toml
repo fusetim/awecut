@@ -1,21 +1,9 @@
 [package]
 name = "awecut"
-authors = ["FuseTim"]
 version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2024"
+authors = ["FuseTim"]
+license = "GPL-3.0-or-later"
+description = "awecut - say bye to the TV commercials"
 
 [dependencies]
-base64 = "0.21.2"
-clap = { version = "4.3.23", features = ["derive"] }
-env_logger = "0.10.0"
-futures-util = "0.3.28"
-indicatif = "0.17.6"
-log = "0.4.20"
-rusty-chromaprint = { git = "https://github.com/fusetim/rusty-chromaprint.git", rev = "b0b587b91e34fda2d3530dbac5c8467c76db80ab" }
-thiserror = "1.0.47"
-tokio = { version = "1.32.0", features = [ "full" ] }
-symphonia = { version = "0.5.2", features = ["all"]}
-indicatif-log-bridge = "0.2.1"
-tempdir = "0.3.7"
