@@ -7,3 +7,5 @@ license = "GPL-3.0-or-later"
 description = "awecut - say bye to the TV commercials"
 
 [dependencies]
+microfft = "0.6.0"
+symphonia = { version = "0.5.4", features = ["all"] }
