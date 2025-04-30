@@ -1,5 +1,6 @@
 use std::{default, time::Duration};
 
+use rustfft::{num_complex::Complex, FftPlanner};
 use symphonia::core::{
     audio::{self, AudioBuffer, Channels, SampleBuffer, Signal, SignalSpec},
     codecs::{Decoder, DecoderOptions},
@@ -10,6 +11,8 @@ use symphonia::core::{
     probe::{Hint, Probe},
     sample,
 };
+
+const SAMPLES_PER_CHUNK: usize = 10 * 50000; // ~10s at 48000Hz
 
 fn main() {
     println!("awecut - say bye to commercials!");
@@ -109,11 +112,11 @@ fn main() {
             .codec_params
             .sample_rate
             .expect("sample rate missing");
-        let sample_duration = (sample_rate * 5) as u64;
+        let sample_duration = SAMPLES_PER_CHUNK as u64;
 
         // Prepare an audio buffer
         let mut sample_buffer: SampleBuffer<f32> =
-            SampleBuffer::new(2*sample_duration, SignalSpec::new(
+            SampleBuffer::new(sample_duration, SignalSpec::new(
                 sample_rate,
                 Channels::FRONT_LEFT,
             ));
@@ -147,10 +150,10 @@ fn main() {
         let mut best_index = 0;
         for (j, segment) in segments.iter().enumerate() {
             let (index, score) = compare_segments(segment, reference);
-            if score > 0.8 {
+            if score > 0.4 {
                 println!(
                     "Found a match! Segment {} matches reference {} with score {} at index {} / time {}min",
-                    j, i, score, index, (j as f32) * 5.0 / 60.0
+                    j, i, score, index, (((j * SAMPLES_PER_CHUNK) as isize + index) as f32 / 48000.0 / 30.0)
                 );
             }
             if score > best_score {
@@ -165,36 +168,79 @@ fn main() {
     }
 }
 
+/// Function to give the number which is a next power of two greater than or equal to n
+pub fn next_power_of_two(n: usize) -> usize {
+    let mut power = 1;
+    while power < n {
+        power *= 2;
+    }
+    power
+}
+
+/// Zero-pad an input vector for the given length
+pub fn zero_pad(input: &[f32], length: usize) -> Vec<Complex<f32>> {
+    let input_len = input.len();
+    if input_len > length {
+        panic!("Input length is greater than the specified length");
+    }
+    let mut padded = vec![Complex::new(0.0, 0.0); length];
+    for i in 0..input_len {
+        padded[i] = Complex::new(input[i], 0.0);
+    }
+    padded
+}
+
 pub fn compare_segments(
     segment: &SampleBuffer<f32>,
     reference: &SampleBuffer<f32>,
-) -> (usize, f32) {
-    // Compare the segments by cross-correlation
+) -> (isize, f32) {
+    let mut planner = FftPlanner::<f32>::new();
 
+    // Zero-pad the segment and reference to the next power of two
     let segment_len = segment.len();
     let reference_len = reference.len();
-    let buffer_len = segment_len + reference_len - 1;
-    let mut buffer = vec![0.0; buffer_len];
+    let cross_correlation_len = segment_len + reference_len - 1;
+    let fft_len = next_power_of_two(cross_correlation_len);
+
+    let mut segment_padded = zero_pad(segment.samples(), fft_len);
+    let mut reference_padded = zero_pad(reference.samples(), fft_len);
+
+    // Create FFT plans
+    let fft = planner.plan_fft_forward(fft_len);
+    let ifft = planner.plan_fft_inverse(fft_len);
+    let fft_scratch_len = fft.get_inplace_scratch_len().max(ifft.get_inplace_scratch_len());
+    let mut fft_scratch = vec![Complex::new(0.0, 0.0); fft_scratch_len];
+
+    // Perform FFT on the segment and reference
+    fft.process_with_scratch(&mut segment_padded, &mut fft_scratch);
+    fft.process_with_scratch(&mut reference_padded, &mut fft_scratch);
 
     // Compute the cross-correlation
-    for d in 0..buffer_len {
-        for i in 0..segment_len {
-            let k = (d as i32) - (i as i32);
-            if k >= 0 && (k as usize) < reference_len {
-                buffer[d] += segment.samples()[i] * reference.samples()[k as usize];
-            }
-        }
+    let mut cross_correlation = vec![Complex::new(0.0, 0.0); fft_len];
+    for i in 0..fft_len {
+        cross_correlation[i] = segment_padded[i] * reference_padded[i].conj();
     }
 
-    // Compute the score as the maximum value in the cross-correlation
+    // Perform IFFT on the cross-correlation
+    ifft.process_with_scratch(&mut cross_correlation, &mut fft_scratch);
+
+    // Get only the real part and interesting part of the cross-correlation
+    let mut real_part = vec![0.0; cross_correlation_len];
+    for i in 0..cross_correlation_len {
+        real_part[i] = cross_correlation[i].re / fft_len as f32;
+    }
+
+    // Find the maximum value in the cross-correlation
     let mut max_index = 0;
     let mut max_value = 0.0;
-    for i in 0..buffer_len {
-        if buffer[i] > max_value {
-            max_value = buffer[i];
+    for i in 0..cross_correlation_len {
+        if real_part[i] > max_value {
+            max_value = real_part[i];
             max_index = i;
         }
     }
 
-    (max_index, max_value)
+    // Normalize the index to the time domain
+    let normalized_index = max_index as isize - (segment_len as isize - 1);
+    (normalized_index, max_value)
 }
