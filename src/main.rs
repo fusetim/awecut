@@ -1,6 +1,7 @@
+use core::time;
 use std::{default, time::Duration};
 
-use rustfft::{num_complex::Complex, FftPlanner};
+use rustfft::{FftPlanner, num_complex::Complex};
 use symphonia::core::{
     audio::{self, AudioBuffer, Channels, SampleBuffer, Signal, SignalSpec},
     codecs::{Decoder, DecoderOptions},
@@ -10,9 +11,10 @@ use symphonia::core::{
     meta::{self, MetadataOptions},
     probe::{Hint, Probe},
     sample,
+    units::Time,
 };
 
-const SAMPLES_PER_CHUNK: usize = 10 * 50000; // ~10s at 48000Hz
+const SAMPLES_PER_CHUNK: usize = 2 * 48000; // ~10s at 48000Hz
 
 fn main() {
     println!("awecut - say bye to commercials!");
@@ -111,15 +113,15 @@ fn main() {
         let sample_rate = default_track
             .codec_params
             .sample_rate
-            .expect("sample rate missing");
-        let sample_duration = SAMPLES_PER_CHUNK as u64;
+            .expect("sample rate missing")
+            * default_track.codec_params.channels.unwrap().count() as u32;
+        let sample_duration = 24000 * 2;
 
         // Prepare an audio buffer
-        let mut sample_buffer: SampleBuffer<f32> =
-            SampleBuffer::new(sample_duration, SignalSpec::new(
-                sample_rate,
-                Channels::FRONT_LEFT,
-            ));
+        let mut sample_buffer: SampleBuffer<f32> = SampleBuffer::new(
+            SAMPLES_PER_CHUNK as u64,
+            SignalSpec::new(sample_rate, Channels::FRONT_LEFT),
+        );
         let mut segment_start_ts = None;
         while let Ok(packet) = probe.format.next_packet() {
             let track_id = packet.track_id();
@@ -127,17 +129,24 @@ fn main() {
                 if segment_start_ts.is_none() {
                     segment_start_ts = Some(packet.ts());
                 } else if (packet.ts() - segment_start_ts.unwrap()) >= sample_duration {
+                    // DEBUG: Print the segment start time, stop time, and duration
+                    println!(
+                        "Segment start: {}ms, stop: {}ms, duration: {}ms",
+                        segment_start_ts.unwrap() as f32 / 24000.0 * 1000.0,
+                        packet.ts() as f32 / 24000.0 * 1000.0,
+                        (packet.ts() - segment_start_ts.unwrap()) as f32 / 24000.0 * 1000.0
+                    );
                     // Store the segment
                     segments.push(sample_buffer);
-                    sample_buffer = SampleBuffer::new(sample_duration, SignalSpec::new(
-                        sample_rate,
-                        Channels::FRONT_LEFT,
-                    ));
+                    sample_buffer = SampleBuffer::new(
+                        sample_duration,
+                        SignalSpec::new(sample_rate, Channels::FRONT_LEFT),
+                    );
                     segment_start_ts = Some(packet.ts());
                 }
 
                 let decoded = decoder.decode(&packet).expect("Failed to decode packet");
-                sample_buffer.copy_planar_ref(decoded);    
+                sample_buffer.copy_planar_ref(decoded);
             }
         }
     }
@@ -150,10 +159,14 @@ fn main() {
         let mut best_index = 0;
         for (j, segment) in segments.iter().enumerate() {
             let (index, score) = compare_segments(segment, reference);
-            if score > 0.4 {
+            if score > 1.0 {
                 println!(
                     "Found a match! Segment {} matches reference {} with score {} at index {} / time {}min",
-                    j, i, score, index, (((j * SAMPLES_PER_CHUNK) as isize + index) as f32 / 48000.0 / 30.0)
+                    j,
+                    i,
+                    score,
+                    index,
+                    j as f32 * 2.0 / 60.0
                 );
             }
             if score > best_score {
@@ -208,7 +221,9 @@ pub fn compare_segments(
     // Create FFT plans
     let fft = planner.plan_fft_forward(fft_len);
     let ifft = planner.plan_fft_inverse(fft_len);
-    let fft_scratch_len = fft.get_inplace_scratch_len().max(ifft.get_inplace_scratch_len());
+    let fft_scratch_len = fft
+        .get_inplace_scratch_len()
+        .max(ifft.get_inplace_scratch_len());
     let mut fft_scratch = vec![Complex::new(0.0, 0.0); fft_scratch_len];
 
     // Perform FFT on the segment and reference
