@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use awecut::audio_correlation::compare_segments;
-use awecut::samples::read_samples;
+use awecut::samples::{make_overlap_samples, read_samples};
 
 const SAMPLE_RATE: usize = 48000; // 48kHz
 const CHUNK_DURATION: usize = 10; // 10s
@@ -53,9 +53,12 @@ fn main() {
     println!("Loaded {} reference samples", references.len());
 
     // Load the input segments (5s segments)
-    let mut input_chunks =
-        read_samples::<PathBuf, SAMPLE_PER_CHUNK, SAMPLE_RATE, AUDIO_CHANNELS>(input_file.into())
+    let mut input_chunks = {
+        let samples = read_samples::<PathBuf, SAMPLE_PER_CHUNK, SAMPLE_RATE, AUDIO_CHANNELS>(input_file.into())
             .expect("Failed to read input file");
+        //make_overlap_samples(samples) -- make stack overflow
+        samples
+    };
 
     // Compare the segments with the references
     for (i, reference) in references.iter().enumerate() {
@@ -70,7 +73,7 @@ fn main() {
                     i,
                     score,
                     index,
-                    j as f32 * (CHUNK_DURATION as f32) / 60.0
+                    j as f32 * (CHUNK_DURATION as f32) / 60.0 / 2.0
                 );
             }
             if score > best_score {

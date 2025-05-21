@@ -1,5 +1,5 @@
 use std::{
-    io::{ErrorKind, Read as _},
+    io::{BufReader, ErrorKind, Read as _},
     path::Path,
 };
 
@@ -101,4 +101,101 @@ pub fn read_samples<P: AsRef<Path>, const N: usize, const S: usize, const C: usi
     });
 
     Ok(iter)
+}
+
+/**
+ * Make a 50% overlap sample iterator
+ * 
+ * N must be even - assert!(N % 2 == 0)
+ */
+pub fn make_overlap_samples<const N: usize>(
+    mut sample_iter: impl Iterator<Item = [f32; N]>,
+) -> impl Iterator<Item = [f32; N]> {
+    assert_eq!(N % 2, 0, "N must be even");
+    let half = N / 2;
+    let mut buffer = vec![0.0; 3*half];
+    let mut tmp = [0.0; N];
+    let mut is_first = true;
+    let mut is_overlap = false; // Flag to indicate if we are in the overlap region
+
+    std::iter::from_fn(move || {
+        if is_first {
+            // Get the first chunk
+            match sample_iter.next() {
+                Some(chunk) => {
+                    // Copy the chunk to the buffer (at part 1)
+                    buffer[0..half].copy_from_slice(&chunk[half..]);
+                    is_first = false;
+                    is_overlap = true;
+                    Some(chunk)
+                }
+                None => None,
+            }
+        } else {
+            // If in the overlap region, get the next chunk
+            if is_overlap {
+                match sample_iter.next() {
+                    Some(chunk) => {
+                        // Copy the chunk to the buffer (at part 2 and 3)
+                        buffer[half..].copy_from_slice(&chunk);
+                        tmp.copy_from_slice(&buffer[0..N]);
+                        is_overlap = false;
+                        Some(tmp)
+                    }
+                    None => None,
+                }
+            } else {
+                // If not in the overlap region, 
+                // the next chunk is actually part 2 and 3 of the buffer
+                // We just need to return that and move the buffer by N
+                tmp.copy_from_slice(&buffer[half..]);
+                buffer.copy_within(N..N+half, 0);
+                is_overlap = true;
+                Some(tmp)
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_make_overlap_samples_empty() {
+        let empty_iter: Vec<[f32; 2]> = vec![];
+        let overlap_iter = make_overlap_samples::<2>(empty_iter.into_iter());
+        assert_eq!(overlap_iter.count(), 0);
+    }
+
+    #[test]
+    fn test_make_overlap_samples_once() {
+        let single_chunk = [[1.0, 2.0]];
+        let mut overlap_iter = make_overlap_samples::<2>(single_chunk.into_iter());
+        assert_eq!(overlap_iter.next(), Some([1.0, 2.0]));
+        assert_eq!(overlap_iter.next(), None);
+    }
+
+    #[test]
+    fn test_make_overlap_samples_twice() {
+        let chunks = [[1.0, 2.0], [3.0, 4.0]];
+        let mut overlap_iter = make_overlap_samples::<2>(chunks.into_iter());
+        assert_eq!(overlap_iter.next(), Some([1.0, 2.0]));
+        assert_eq!(overlap_iter.next(), Some([2.0, 3.0]));
+        assert_eq!(overlap_iter.next(), Some([3.0, 4.0]));
+        assert_eq!(overlap_iter.next(), None);
+    }
+
+    #[test]
+    fn test_make_overlap_samples_thrice() {
+        let chunks = [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
+        let mut overlap_iter = make_overlap_samples::<2>(chunks.into_iter());
+        assert_eq!(overlap_iter.next(), Some([1.0, 2.0]));
+        assert_eq!(overlap_iter.next(), Some([2.0, 3.0]));
+        assert_eq!(overlap_iter.next(), Some([3.0, 4.0]));
+        assert_eq!(overlap_iter.next(), Some([4.0, 5.0]));
+        assert_eq!(overlap_iter.next(), Some([5.0, 6.0]));
+        assert_eq!(overlap_iter.next(), None);
+    }
+
 }
