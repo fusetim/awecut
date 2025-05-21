@@ -8,4 +8,3 @@ description = "awecut - say bye to the TV commercials"
 
 [dependencies]
 rustfft = "6.3.0"
-symphonia = { version = "0.5.4", features = ["all"] }

@@ -1,20 +1,12 @@
-use core::time;
-use std::{default, time::Duration};
+use std::path::{Path, PathBuf};
 
+use awecut::samples::read_samples;
 use rustfft::{FftPlanner, num_complex::Complex};
-use symphonia::core::{
-    audio::{self, AudioBuffer, Channels, SampleBuffer, Signal, SignalSpec},
-    codecs::{Decoder, DecoderOptions},
-    conv::IntoSample,
-    formats::FormatOptions,
-    io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions},
-    meta::{self, MetadataOptions},
-    probe::{Hint, Probe},
-    sample,
-    units::Time,
-};
 
-const SAMPLES_PER_CHUNK: usize = 2 * 48000; // ~10s at 48000Hz
+const SAMPLE_RATE: usize = 48000; // 48kHz
+const CHUNK_DURATION: usize = 10; // 10s
+const SAMPLE_PER_CHUNK: usize = SAMPLE_RATE * CHUNK_DURATION; // 10s of samples
+const AUDIO_CHANNELS : usize = 1; // Mono
 
 fn main() {
     println!("awecut - say bye to commercials!");
@@ -34,56 +26,24 @@ fn main() {
         let entry = entry.unwrap();
         let path = entry.path();
         if path.is_file() {
-            let file = std::fs::File::open(&path).unwrap();
-            let source = MediaSourceStream::new(Box::new(file), Default::default());
-            let hint = Hint::new();
-            let format_opts = FormatOptions::default();
-            let metadata_opts = MetadataOptions::default();
-            match symphonia::default::get_probe().format(
-                &hint,
-                source,
-                &format_opts,
-                &metadata_opts,
-            ) {
-                Ok(mut probe) => {
-                    let default_track = probe
-                        .format
-                        .default_track()
-                        .expect("Failed to get default track");
-                    let default_track_id = default_track.id;
-
-                    // Prepare an audio buffer
-                    let spec = SignalSpec::new(
-                        default_track
-                            .codec_params
-                            .sample_rate
-                            .expect("sample rate missing"),
-                        Channels::FRONT_LEFT,
-                    );
-                    let mut sample_buffer: SampleBuffer<f32> =
-                        SampleBuffer::new(default_track.codec_params.n_frames.unwrap(), spec);
-
-                    // Prepare the decoder
-                    let decoder_opts = DecoderOptions::default();
-                    let mut decoder = symphonia::default::get_codecs()
-                        .make(&default_track.codec_params, &decoder_opts)
-                        .expect("Failed to create decoder");
-
-                    // Decode the audio data in 5s segments
-                    while let Ok(packet) = probe.format.next_packet() {
-                        let track_id = packet.track_id();
-                        if track_id == default_track_id {
-                            let decoded = decoder.decode(&packet).expect("Failed to decode packet");
-                            sample_buffer.copy_planar_ref(decoded);
+            match read_samples::<&Path, SAMPLE_PER_CHUNK, SAMPLE_RATE, AUDIO_CHANNELS>(path.as_path()) {
+                Ok(sample_iter) => {
+                    let raw_chunks = sample_iter.collect::<Vec<_>>();
+                    if raw_chunks.len() > 0 {
+                        // Concatenate the chunks into a single vector
+                        let mut reference = Vec::new();
+                        for chunk in raw_chunks.iter() {
+                            reference.extend_from_slice(chunk);
                         }
+                        // Store the reference samples
+                        references.push(reference);
+                    } else {
+                        eprintln!("No samples found in file: {:?}", path);
                     }
-
-                    // Convert the sample buffer to a vector of f32
-                    references.push(sample_buffer);
-                }
-                Err(e) => {
-                    eprintln!("Error loading reference file {}: {}", path.display(), e);
-                }
+                },
+                Err(_) => {
+                    eprintln!("Error reading samples from file: {:?}", path);
+                },
             }
         }
     }
@@ -91,82 +51,23 @@ fn main() {
     println!("Loaded {} reference samples", references.len());
 
     // Load the input segments (5s segments)
-    let mut segments = Vec::new();
-    {
-        let input_file = std::fs::File::open(input_file).unwrap();
-        let source = MediaSourceStream::new(Box::new(input_file), Default::default());
-        let hint = Hint::new();
-        let format_opts = FormatOptions::default();
-        let metadata_opts = MetadataOptions::default();
-        let mut probe = symphonia::default::get_probe()
-            .format(&hint, source, &format_opts, &metadata_opts)
-            .expect("Failed to load input file");
-        let default_track = probe
-            .format
-            .default_track()
-            .expect("Failed to get default track");
-        let default_track_id = default_track.id;
-        let decoder_opts = DecoderOptions::default();
-        let mut decoder = symphonia::default::get_codecs()
-            .make(&default_track.codec_params, &decoder_opts)
-            .expect("Failed to create decoder");
-        let sample_rate = default_track
-            .codec_params
-            .sample_rate
-            .expect("sample rate missing")
-            * default_track.codec_params.channels.unwrap().count() as u32;
-        let sample_duration = 24000 * 2;
-
-        // Prepare an audio buffer
-        let mut sample_buffer: SampleBuffer<f32> = SampleBuffer::new(
-            SAMPLES_PER_CHUNK as u64,
-            SignalSpec::new(sample_rate, Channels::FRONT_LEFT),
-        );
-        let mut segment_start_ts = None;
-        while let Ok(packet) = probe.format.next_packet() {
-            let track_id = packet.track_id();
-            if track_id == default_track_id {
-                if segment_start_ts.is_none() {
-                    segment_start_ts = Some(packet.ts());
-                } else if (packet.ts() - segment_start_ts.unwrap()) >= sample_duration {
-                    // DEBUG: Print the segment start time, stop time, and duration
-                    println!(
-                        "Segment start: {}ms, stop: {}ms, duration: {}ms",
-                        segment_start_ts.unwrap() as f32 / 24000.0 * 1000.0,
-                        packet.ts() as f32 / 24000.0 * 1000.0,
-                        (packet.ts() - segment_start_ts.unwrap()) as f32 / 24000.0 * 1000.0
-                    );
-                    // Store the segment
-                    segments.push(sample_buffer);
-                    sample_buffer = SampleBuffer::new(
-                        sample_duration,
-                        SignalSpec::new(sample_rate, Channels::FRONT_LEFT),
-                    );
-                    segment_start_ts = Some(packet.ts());
-                }
-
-                let decoded = decoder.decode(&packet).expect("Failed to decode packet");
-                sample_buffer.copy_planar_ref(decoded);
-            }
-        }
-    }
-
-    println!("Loaded {} segments", segments.len());
+    let mut input_chunks = read_samples::<PathBuf, SAMPLE_PER_CHUNK, SAMPLE_RATE, AUDIO_CHANNELS>(input_file.into())
+            .expect("Failed to read input file");
 
     // Compare the segments with the references
     for (i, reference) in references.iter().enumerate() {
         let mut best_score = 0.0;
         let mut best_index = 0;
-        for (j, segment) in segments.iter().enumerate() {
-            let (index, score) = compare_segments(segment, reference);
-            if score > 1.0 {
+        for (j, segment) in input_chunks.by_ref().enumerate() {
+            let (index, score) = compare_segments(&segment, reference);
+            if score > 1000.0 {
                 println!(
                     "Found a match! Segment {} matches reference {} with score {} at index {} / time {}min",
                     j,
                     i,
                     score,
                     index,
-                    j as f32 * 2.0 / 60.0
+                    j as f32 * (CHUNK_DURATION as f32) / 60.0
                 );
             }
             if score > best_score {
@@ -204,8 +105,8 @@ pub fn zero_pad(input: &[f32], length: usize) -> Vec<Complex<f32>> {
 }
 
 pub fn compare_segments(
-    segment: &SampleBuffer<f32>,
-    reference: &SampleBuffer<f32>,
+    segment: &[f32],
+    reference: &[f32],
 ) -> (isize, f32) {
     let mut planner = FftPlanner::<f32>::new();
 
@@ -215,8 +116,8 @@ pub fn compare_segments(
     let cross_correlation_len = segment_len + reference_len - 1;
     let fft_len = next_power_of_two(cross_correlation_len);
 
-    let mut segment_padded = zero_pad(segment.samples(), fft_len);
-    let mut reference_padded = zero_pad(reference.samples(), fft_len);
+    let mut segment_padded = zero_pad(segment, fft_len);
+    let mut reference_padded = zero_pad(reference, fft_len);
 
     // Create FFT plans
     let fft = planner.plan_fft_forward(fft_len);
