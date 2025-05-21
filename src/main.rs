@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use awecut::audio_correlation::compare_segments;
+use awecut::audio_correlation::{calculate_time_difference, compare_segments};
 use awecut::samples::{make_overlap_samples, read_samples};
 
 const SAMPLE_RATE: usize = 48000; // 48kHz
@@ -64,16 +64,21 @@ fn main() {
     for (i, reference) in references.iter().enumerate() {
         let mut best_score = 0.0;
         let mut best_index = 0;
+
+        // Get the duration of the reference in seconds
+        let duration_second = reference.len() as f32 / SAMPLE_RATE as f32;
         for (j, segment) in input_chunks.by_ref().enumerate() {
             let (index, score) = compare_segments(segment.as_ref(), reference);
             if score > 1000.0 {
+                let time_chunk = calculate_time_difference(index, SAMPLE_RATE as f32, CHUNK_DURATION as f32, duration_second);
+                let chunk_start_time = j as f32 * (CHUNK_DURATION as f32) / 2.0; // start time of the chunk in seconds
                 println!(
                     "Found a match! Segment {} matches reference {} with score {} at index {} / time {}min",
                     j,
                     i,
                     score,
                     index,
-                    j as f32 * (CHUNK_DURATION as f32) / 60.0 / 2.0
+                    (chunk_start_time + time_chunk) / 60.0,
                 );
             }
             if score > best_score {

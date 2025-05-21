@@ -76,3 +76,79 @@ pub fn compare_segments(segment: &[f32], reference: &[f32]) -> (isize, f32) {
     let normalized_index = max_index as isize - (segment_len as isize - 1);
     (normalized_index, max_value)
 }
+
+/// Calculate the time difference between two audio segments
+/// given their maximum cross-correlation index
+/// Returns the time difference in seconds
+/// 
+/// TODO: Does not take into account the Zero-padding added to the segments
+/// 
+/// # Arguments
+/// 
+/// * `index` - The index of the maximum cross-correlation
+/// * `sample_rate` - The sample rate of the audio segments
+/// * `duration_first` - The duration of the first segment in seconds
+/// * `duration_second` - The duration of the second segment in seconds
+/// 
+/// # Returns
+/// 
+/// * `f32` - The time difference in seconds
+///           Positive value indicates the first segment is ahead of the second
+///           Negative value indicates the first segment is behind the second  
+pub fn calculate_time_difference(index: isize, sample_rate: f32, duration_first: f32, duration_second: f32) -> f32 {
+    let time_diff = index as f32 / sample_rate;
+    let time_diff_seconds = (duration_first - duration_second) / 2.0 - time_diff;
+    time_diff_seconds
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_next_power_of_two() {
+        assert_eq!(next_power_of_two(5), 8);
+        assert_eq!(next_power_of_two(8), 8);
+        assert_eq!(next_power_of_two(9), 16);
+        assert_eq!(next_power_of_two(15), 16);
+    }
+
+    #[test]
+    fn test_zero_pad() {
+        let input = vec![1.0, 2.0, 3.0];
+        let padded = zero_pad(&input, 6);
+        assert_eq!(padded.len(), 6);
+        assert_eq!(padded[0], Complex::new(1.0, 0.0));
+        assert_eq!(padded[1], Complex::new(2.0, 0.0));
+        assert_eq!(padded[2], Complex::new(3.0, 0.0));
+        assert_eq!(padded[3], Complex::new(0.0, 0.0));
+        assert_eq!(padded[4], Complex::new(0.0, 0.0));
+        assert_eq!(padded[5], Complex::new(0.0, 0.0));
+    }
+
+    #[test]
+    fn test_calculate_time_difference() {
+        let first_segment = [1.0, 2.0, 3.0, 4.0, 7.0, 0.0, 0.0, 0.0, 9.0, 10.0, 3.0, 2.0];
+        let second_segment = [9.0, 10.0, 3.0, 2.0, 1.0, 8.0, 18.0, 4.0, 63.0, 52.0, 53.0, 0.0, 0.0, 10.0];
+        let sample_rate = 2.0;
+
+        let (index, _) = compare_segments(&first_segment, &second_segment);
+        let duration_first = first_segment.len() as f32 / sample_rate;
+        let duration_second = second_segment.len() as f32 / sample_rate;
+        let time_diff = calculate_time_difference(index, sample_rate, duration_first, duration_second);
+        assert_eq!(time_diff, 5.0);
+    }
+
+    #[test]
+    fn test_calculate_time_difference_2() {
+        let first_segment = [1.0, 2.0, 3.0, 4.0, 7.0, 0.0, 0.0, 0.0, 9.0, 10.0, 3.0, 2.0];
+        let second_segment = [9.0, 10.0, 3.0, 2.0, 1.0, 8.0, 18.0, 4.0, 63.0, 52.0, 53.0, 0.0, 0.0, 10.0];
+        let sample_rate = 4.0;
+
+        let (index, _) = compare_segments(&first_segment, &second_segment);
+        let duration_first = first_segment.len() as f32 / sample_rate;
+        let duration_second = second_segment.len() as f32 / sample_rate;
+        let time_diff = calculate_time_difference(index, sample_rate, duration_first, duration_second);
+        assert_eq!(time_diff, 2.5);
+    }
+}
