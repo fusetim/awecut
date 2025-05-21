@@ -35,7 +35,7 @@ fn main() {
                         // Concatenate the chunks into a single vector
                         let mut reference = Vec::new();
                         for chunk in raw_chunks.iter() {
-                            reference.extend_from_slice(chunk);
+                            reference.extend_from_slice(chunk.as_ref());
                         }
                         // Store the reference samples
                         references.push(reference);
@@ -56,8 +56,8 @@ fn main() {
     let mut input_chunks = {
         let samples = read_samples::<PathBuf, SAMPLE_PER_CHUNK, SAMPLE_RATE, AUDIO_CHANNELS>(input_file.into())
             .expect("Failed to read input file");
-        //make_overlap_samples(samples) -- make stack overflow
-        samples
+        make_overlap_samples(samples) //-- make stack overflow
+        //samples
     };
 
     // Compare the segments with the references
@@ -65,7 +65,7 @@ fn main() {
         let mut best_score = 0.0;
         let mut best_index = 0;
         for (j, segment) in input_chunks.by_ref().enumerate() {
-            let (index, score) = compare_segments(&segment, reference);
+            let (index, score) = compare_segments(segment.as_ref(), reference);
             if score > 1000.0 {
                 println!(
                     "Found a match! Segment {} matches reference {} with score {} at index {} / time {}min",
